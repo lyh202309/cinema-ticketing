@@ -1,0 +1,45 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: cinema-ticketing
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/cinema_ticketing?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 1
+      # password:
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: lyh
+    password: 123456
+    virtual-host: /
+
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+# ===== 业务配置 =====
+cinema:
+  # DeepSeek API（AI 助手用，实现时填写）
+  deepseek:
+    api-key: "sk-6a88500ff10248ad9f3ce00f46f1a362"
+    base-url: https://api.deepseek.com
