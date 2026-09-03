@@ -1,0 +1,36 @@
+# ===== 后端编译产物 =====
+target/
+**/target/
+*.class
+*.jar
+*.war
+
+# ===== 前端依赖与构建产物 =====
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+
+# ===== IDE / 编辑器（不入库）=====
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# ===== 日志 / 临时文件 =====
+*.log
+logs/
+*.tmp
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+
+# ===== 二进制文档（doc/docx/pdf 不上传）=====
+*.doc
+*.docx
+*.pdf
+
+# ===== 本地敏感配置（如需保留本机真值，用这种文件且不要提交）=====
+# server/src/main/resources/application-local.yaml
