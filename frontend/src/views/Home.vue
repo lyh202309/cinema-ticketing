@@ -231,8 +231,8 @@ function askAi(q) {
 
 /* 6:4 并排（窄屏回落单列） */
 .row-64 { display: grid; grid-template-columns: 6.5fr 3.5fr; gap: 24px; align-items: start; }
-/* 中等宽度下两列 6:4 太挤（左列卡被裁贴边、与右列相挤），提前回落单列 */
-@media (max-width: 1100px) { .row-64 { grid-template-columns: 1fr; } }
+/* 桌面与窄桌面始终并排双栏；仅移动端(<860px)才回落单列 */
+@media (max-width: 860px) { .row-64 { grid-template-columns: 1fr; } }
 
 .sec-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
 /* 即将上映：标题容器与下方卡片组同宽(2×175 + 12gap = 362)并右端对齐 → 标题左缘正贴卡片组左缘 */
