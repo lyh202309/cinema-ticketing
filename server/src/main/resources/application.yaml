@@ -7,19 +7,19 @@ spring:
 
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url:
+    url: jdbc:mysql://localhost:3306/cinema_ticketing?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username:
     password:
 
   data:
     redis:
-      host:
+      host: localhost
       port:
       database:
       # password:
 
   rabbitmq:
-    host:
+    host: localhost
     port:
     username:
     password:

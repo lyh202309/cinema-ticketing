@@ -20,31 +20,31 @@ public class OrderController {
     private final IOrderService orderService;
 
     @GetMapping("/my")
-    public Result<PageResult<OrderListItemVO>> my(@RequestParam(required = false) Integer status,
-                                                  @RequestParam(defaultValue = "1") Integer page,
-                                                  @RequestParam(defaultValue = "10") Integer size) {
+    public Result<PageResult<OrderListItemVO>> my(@RequestParam(value = "status", required = false) Integer status,
+                                                  @RequestParam(value = "page", defaultValue = "1") Integer page,
+                                                  @RequestParam(value = "size", defaultValue = "10") Integer size) {
         return Result.ok(orderService.myOrders(UserHolder.getUserId(), status, page, size));
     }
 
     @GetMapping("/{orderId}")
-    public Result<OrderDetailVO> detail(@PathVariable Long orderId) {
+    public Result<OrderDetailVO> detail(@PathVariable("orderId") Long orderId) {
         return Result.ok(orderService.getDetail(orderId, UserHolder.getUserId()));
     }
 
     @PostMapping("/{orderId}/pay")
-    public Result<Void> pay(@PathVariable Long orderId) {
+    public Result<Void> pay(@PathVariable("orderId") Long orderId) {
         orderService.pay(orderId, UserHolder.getUserId());
         return Result.ok();
     }
 
     @PostMapping("/{orderId}/cancel")
-    public Result<Void> cancel(@PathVariable Long orderId) {
+    public Result<Void> cancel(@PathVariable("orderId") Long orderId) {
         orderService.cancel(orderId, UserHolder.getUserId());
         return Result.ok();
     }
 
     @PostMapping("/{orderId}/refund")
-    public Result<Void> refund(@PathVariable Long orderId) {
+    public Result<Void> refund(@PathVariable("orderId") Long orderId) {
         orderService.refund(orderId, UserHolder.getUserId());
         return Result.ok();
     }

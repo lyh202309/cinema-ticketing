@@ -29,7 +29,7 @@ public class SeckillController {
      */
     @PostMapping("/qualify/{sessionId}")
     @RateLimit(key = "qualify", qps = 1000, limit = 3, windowMs = 5000)
-    public Result<Integer> qualify(@PathVariable Long sessionId) {
+    public Result<Integer> qualify(@PathVariable("sessionId") Long sessionId) {
         int result = seckillService.qualify(sessionId);
         if (result == 1) {
             return Result.fail("当前人数过多，服务器繁忙，请稍后重试");
@@ -44,7 +44,7 @@ public class SeckillController {
      * 座位图（热门场次校验资格；越权 → 403 非法操作）
      */
     @GetMapping("/seatmap/{sessionId}")
-    public Result<SeatMapVO> seatMap(@PathVariable Long sessionId) {
+    public Result<SeatMapVO> seatMap(@PathVariable("sessionId") Long sessionId) {
         return Result.ok(seckillService.seatMap(sessionId));
     }
 
@@ -53,7 +53,7 @@ public class SeckillController {
      * 热门场次校验资格（过期/未抢 → 403），与座位图同权
      */
     @GetMapping("/seatmap/{sessionId}/subscribe")
-    public SseEmitter subscribe(@PathVariable Long sessionId) {
+    public SseEmitter subscribe(@PathVariable("sessionId") Long sessionId) {
         seckillService.ensureViewable(sessionId);
         return seatEventHub.subscribe(sessionId, UserHolder.getUserId());
     }

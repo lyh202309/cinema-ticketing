@@ -34,19 +34,19 @@ public class ChatController {
     }
 
     @GetMapping("/conversations/{id}/messages")
-    public Result<List<ChatMessage>> messages(@PathVariable Long id) {
+    public Result<List<ChatMessage>> messages(@PathVariable("id") Long id) {
         return Result.ok(chatService.listMessages(id, UserHolder.getUserId()));
     }
 
     @DeleteMapping("/conversations/{id}")
-    public Result<Void> delete(@PathVariable Long id) {
+    public Result<Void> delete(@PathVariable("id") Long id) {
         chatService.deleteConversation(id, UserHolder.getUserId());
         return Result.ok();
     }
 
     /** SSE 流式问答 */
     @PostMapping("/conversations/{id}/chat")
-    public SseEmitter chat(@PathVariable Long id, @RequestBody ChatRequest request) {
+    public SseEmitter chat(@PathVariable("id") Long id, @RequestBody ChatRequest request) {
         SseEmitter emitter = new SseEmitter(120_000L);
         chatService.ask(id, UserHolder.getUserId(), request.getMessage(), emitter);
         return emitter;

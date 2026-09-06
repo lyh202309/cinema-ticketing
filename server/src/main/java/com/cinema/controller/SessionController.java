@@ -19,16 +19,16 @@ public class SessionController {
     private final ISessionService sessionService;
 
     @GetMapping
-    public Result<PageResult<SessionVO>> list(@RequestParam(required = false) Long movieId,
-                                              @RequestParam(required = false) Long cinemaId,
-                                              @RequestParam(required = false) String date,
-                                              @RequestParam(defaultValue = "1") Integer page,
-                                              @RequestParam(defaultValue = "10") Integer size) {
+    public Result<PageResult<SessionVO>> list(@RequestParam(value = "movieId", required = false) Long movieId,
+                                              @RequestParam(value = "cinemaId", required = false) Long cinemaId,
+                                              @RequestParam(value = "date", required = false) String date,
+                                              @RequestParam(value = "page", defaultValue = "1") Integer page,
+                                              @RequestParam(value = "size", defaultValue = "10") Integer size) {
         return Result.ok(sessionService.pageSessions(movieId, cinemaId, date, page, size));
     }
 
     @GetMapping("/{id}")
-    public Result<SessionDetailVO> detail(@PathVariable Long id) {
+    public Result<SessionDetailVO> detail(@PathVariable("id") Long id) {
         SessionDetailVO vo = sessionService.getDetail(id);
         return vo == null ? Result.fail("场次不存在") : Result.ok(vo);
     }

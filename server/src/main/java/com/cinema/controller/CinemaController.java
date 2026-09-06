@@ -19,14 +19,14 @@ public class CinemaController {
     private final ICinemaService cinemaService;
 
     @GetMapping
-    public Result<PageResult<Cinema>> list(@RequestParam(required = false) String region,
-                                           @RequestParam(defaultValue = "1") Integer page,
-                                           @RequestParam(defaultValue = "10") Integer size) {
+    public Result<PageResult<Cinema>> list(@RequestParam(value = "region", required = false) String region,
+                                           @RequestParam(value = "page", defaultValue = "1") Integer page,
+                                           @RequestParam(value = "size", defaultValue = "10") Integer size) {
         return Result.ok(cinemaService.pageByRegion(region, page, size));
     }
 
     @GetMapping("/{id}")
-    public Result<CinemaDetailVO> detail(@PathVariable Long id) {
+    public Result<CinemaDetailVO> detail(@PathVariable("id") Long id) {
         CinemaDetailVO vo = cinemaService.getDetail(id);
         return vo == null ? Result.fail("影院不存在") : Result.ok(vo);
     }

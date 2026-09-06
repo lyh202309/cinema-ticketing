@@ -18,15 +18,15 @@ public class MovieController {
     private final IMovieService movieService;
 
     @GetMapping
-    public Result<PageResult<Movie>> list(@RequestParam(required = false) String genre,
-                                          @RequestParam(required = false) Integer status,
-                                          @RequestParam(defaultValue = "1") Integer page,
-                                          @RequestParam(defaultValue = "10") Integer size) {
+    public Result<PageResult<Movie>> list(@RequestParam(value = "genre", required = false) String genre,
+                                          @RequestParam(value = "status", required = false) Integer status,
+                                          @RequestParam(value = "page", defaultValue = "1") Integer page,
+                                          @RequestParam(value = "size", defaultValue = "10") Integer size) {
         return Result.ok(movieService.pageByGenre(genre, status, page, size));
     }
 
     @GetMapping("/{id}")
-    public Result<Movie> detail(@PathVariable Long id) {
+    public Result<Movie> detail(@PathVariable("id") Long id) {
         Movie movie = movieService.getDetail(id);
         return movie == null ? Result.fail("电影不存在") : Result.ok(movie);
     }
