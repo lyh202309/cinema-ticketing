@@ -51,8 +51,9 @@ public class SeatQueryTool {
         String seatsKey = RedisConstants.SEATS_KEY + sessionId;
         if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(seatsKey))) {
             Map<Object, Object> state = stringRedisTemplate.opsForHash().entries(seatsKey);
+            // value 非 "0" 即占用（"0" 可售 / userId 占用）
             state.forEach((k, v) -> {
-                if ("1".equals(v)) {
+                if (!"0".equals(v)) {
                     occupied.add(String.valueOf(k));
                 }
             });

@@ -192,16 +192,11 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         List<OrderSeat> seatList = orderSeatMapper.selectList(
                 new LambdaQueryWrapper<OrderSeat>().eq(OrderSeat::getOrderId, order.getId()));
         List<String> seatNos = new ArrayList<>();
-        List<String> lockKeys = new ArrayList<>();
         for (OrderSeat os : seatList) {
-            String seatNo = os.getSeatRow() + "-" + os.getSeatCol();
-            seatNos.add(seatNo);
-            lockKeys.add(RedisConstants.LOCK_SEAT_KEY + order.getSessionId() + ":" + seatNo);
+            seatNos.add(os.getSeatRow() + "-" + os.getSeatCol());
         }
         if (!seatNos.isEmpty()) {
-            List<String> keys = new ArrayList<>();
-            keys.add(RedisConstants.SEATS_KEY + order.getSessionId());
-            keys.addAll(lockKeys);
+            List<String> keys = List.of(RedisConstants.SEATS_KEY + order.getSessionId());
             List<String> args = new ArrayList<>();
             args.add(String.valueOf(order.getUserId()));
             args.addAll(seatNos);

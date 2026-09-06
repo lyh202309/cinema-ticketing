@@ -33,8 +33,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -60,8 +62,6 @@ public class SeckillServiceImpl implements ISeckillService {
     private final SeatEventHub seatEventHub;
 
     private static final int MAX_SEATS = 5;
-    /** 座位归属锁 TTL（秒）：幽灵锁自动过期兜底 */
-    private static final long LOCK_TTL_SECONDS = 300;
     /** 一人一单标记 TTL（秒）：覆盖订单全生命周期后自动释放 */
     private static final long USER_ORDER_TTL_SECONDS = 600;
 
@@ -162,7 +162,7 @@ public class SeckillServiceImpl implements ISeckillService {
         int cols = hall.getColCount();
         int[][] seats = new int[rows][cols];
         state.forEach((field, value) -> {
-            if ("1".equals(value)) {
+            if (!"0".equals(value)) {
                 String[] rc = String.valueOf(field).split("-");
                 int r = Integer.parseInt(rc[0]) - 1;
                 int c = Integer.parseInt(rc[1]) - 1;
@@ -233,20 +233,22 @@ public class SeckillServiceImpl implements ISeckillService {
             seatNos.add(seatNo);
         }
 
-        // ===== Lua 锁座（校验可售 + 置位 + 归属锁 + 一人一单，原子）=====
+        // ===== Lua 锁座（座位图缺失校验 + 一人一单 + 校验可售 + 置占用，原子）=====
         List<String> keys = new ArrayList<>();
         keys.add(RedisConstants.SEATS_KEY + request.getSessionId());                      // KEYS[1]
         keys.add(RedisConstants.USER_ORDER_KEY + request.getSessionId() + ":" + userId);   // KEYS[2]
-        for (String sn : seatNos) {
-            keys.add(RedisConstants.LOCK_SEAT_KEY + request.getSessionId() + ":" + sn);    // KEYS[3..]
-        }
         List<String> args = new ArrayList<>(seatNos);
         args.add(String.valueOf(userId));
-        args.add(String.valueOf(LOCK_TTL_SECONDS));
         args.add(String.valueOf(USER_ORDER_TTL_SECONDS));
 
         Long lockResult = stringRedisTemplate.execute(LOCK_SEAT_SCRIPT, keys, args.toArray());
         int r = lockResult == null ? 1 : lockResult.intValue();
+        if (r == 4) {
+            // 座位图整体缺失（未初始化 / TTL 过期 / Redis 丢失）→ 从 DB 重建后重试一次
+            rebuildSeatState(session, hall);
+            lockResult = stringRedisTemplate.execute(LOCK_SEAT_SCRIPT, keys, args.toArray());
+            r = lockResult == null ? 1 : lockResult.intValue();
+        }
         if (r == 1) {
             throw new BusinessException("部分座位已被选择，请重新选座");
         }
@@ -297,20 +299,25 @@ public class SeckillServiceImpl implements ISeckillService {
         return score != null && score > System.currentTimeMillis() / 1000.0;
     }
 
-    /** 从 DB 重建场次座位状态：有效订单(待支付/已支付)占用的座位标 1，写回 Redis */
+    /** 从 DB 重建场次座位状态：有效订单(待支付/已支付)占用的座位标 userId，其余标 "0"，全量写回 Redis */
     private void rebuildSeatState(Session session, Hall hall) {
-        List<Long> validOrderIds = orderMapper.selectList(
-                        new LambdaQueryWrapper<Order>()
-                                .select(Order::getId)
-                                .eq(Order::getSessionId, session.getId())
-                                .in(Order::getStatus, List.of(0, 1)))
-                .stream().map(Order::getId).toList();
-
-        Set<String> occupied = new HashSet<>();
-        if (!validOrderIds.isEmpty()) {
+        // 有效订单 → 座位归属 userId（value 供释放时归属校验）
+        List<Order> validOrders = orderMapper.selectList(
+                new LambdaQueryWrapper<Order>()
+                        .select(Order::getId, Order::getUserId)
+                        .eq(Order::getSessionId, session.getId())
+                        .in(Order::getStatus, List.of(0, 1)));
+        Map<Long, Long> orderUser = new HashMap<>();
+        for (Order o : validOrders) {
+            orderUser.put(o.getId(), o.getUserId());
+        }
+        Map<String, Long> occupied = new HashMap<>();   // seatNo -> userId
+        if (!validOrders.isEmpty()) {
             orderSeatMapper.selectList(new LambdaQueryWrapper<OrderSeat>()
-                            .in(OrderSeat::getOrderId, validOrderIds))
-                    .forEach(os -> occupied.add(os.getSeatRow() + "-" + os.getSeatCol()));
+                            .in(OrderSeat::getOrderId, orderUser.keySet()))
+                    .forEach(os -> occupied.put(
+                            os.getSeatRow() + "-" + os.getSeatCol(),
+                            orderUser.get(os.getOrderId())));
         }
 
         String seatsKey = RedisConstants.SEATS_KEY + session.getId();
@@ -318,26 +325,26 @@ public class SeckillServiceImpl implements ISeckillService {
             @Override
             public Object doInRedis(RedisConnection connection) {
                 byte[] hKey = seatsKey.getBytes(StandardCharsets.UTF_8);
+                // 全量写：可售写 "0"，占用写 userId（保证 Hash 恒存在、空场次亦非空，天然覆盖幽灵占位）
                 for (int r = 1; r <= hall.getRowCount(); r++) {
                     for (int c = 1; c <= hall.getColCount(); c++) {
                         String seatNo = r + "-" + c;
                         byte[] field = seatNo.getBytes(StandardCharsets.UTF_8);
-                        byte[] value = (occupied.contains(seatNo) ? "1" : "0").getBytes(StandardCharsets.UTF_8);
+                        Long owner = occupied.get(seatNo);
+                        byte[] value = (owner == null ? "0" : String.valueOf(owner)).getBytes(StandardCharsets.UTF_8);
                         connection.hashCommands().hSet(hKey, field, value);
                     }
                 }
                 return null;
             }
         });
+        // 座位图整体 TTL：定期整体重建，兜底幽灵占位
+        stringRedisTemplate.expire(seatsKey, Duration.ofSeconds(RedisConstants.SEATS_TTL_SECONDS));
     }
 
     /** 释放座位（归属校验在 Lua 内）：取消/退票/落库失败补偿共用 */
     private void releaseSeats(Long sessionId, List<String> seatNos, Long userId) {
-        List<String> keys = new ArrayList<>();
-        keys.add(RedisConstants.SEATS_KEY + sessionId);
-        for (String sn : seatNos) {
-            keys.add(RedisConstants.LOCK_SEAT_KEY + sessionId + ":" + sn);
-        }
+        List<String> keys = List.of(RedisConstants.SEATS_KEY + sessionId);
         List<String> args = new ArrayList<>();
         args.add(String.valueOf(userId));
         args.addAll(seatNos);

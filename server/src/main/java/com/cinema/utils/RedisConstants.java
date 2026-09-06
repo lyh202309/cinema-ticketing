@@ -23,9 +23,6 @@ public class RedisConstants {
     /** 资格池 ZSet qualify:pool:{sessionId} */
     public static final String QUALIFY_POOL_KEY = "qualify:pool:";
 
-    /** 座位锁归属 lock:seat:{sessionId}:{seatNo} */
-    public static final String LOCK_SEAT_KEY = "lock:seat:";
-
     /** 一人一单标记 userOrder:{sessionId}:{userId} */
     public static final String USER_ORDER_KEY = "userOrder:";
 
@@ -45,6 +42,7 @@ public class RedisConstants {
     public static final Long LOGIN_CODE_TTL = 5L;       // 分钟
     public static final Long LOGIN_TOKEN_TTL = 30L;     // 分钟
     public static final Long QUALIFY_TTL_SECONDS = 180L;  // 资格 3 分钟(秒)
+    public static final Long SEATS_TTL_SECONDS = 18000L;  // 座位图整体 5 小时重建一次(秒)
     public static final Duration CACHE_TTL = Duration.ofMinutes(30);   // 详情缓存
     public static final Duration EMPTY_TTL = Duration.ofMinutes(2);    // 空值哨兵(防穿透)短 TTL
     public static final Duration LOCK_CACHE_TTL = Duration.ofSeconds(10); // 重建互斥锁持有时间

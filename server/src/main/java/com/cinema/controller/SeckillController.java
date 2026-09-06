@@ -34,9 +34,9 @@ public class SeckillController {
         if (result == 1) {
             return Result.fail("当前人数过多，服务器繁忙，请稍后重试");
         }
-        if (result == 2) {
-            return Result.fail("请勿重复操作");
-        }
+        // if (result == 2) {
+        //     return Result.fail("请勿重复操作");
+        // }
         return Result.ok(0);   // 抢到 → 前端跳转座位图
     }
 

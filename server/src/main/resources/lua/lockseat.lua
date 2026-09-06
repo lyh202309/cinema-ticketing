@@ -1,39 +1,41 @@
--- 锁座（Redis 原子）：校验可售 → 全部置位 → 写座位归属锁 → 一人一单标记
--- 座位状态用 Hash：KEYS[1] = seats:session:{sid}，field=seatNo，value 0可售/1占用
+-- 锁座（Redis 原子）：座位图缺失校验 → 一人一单 → 校验可售 → 置占用
+-- 座位状态用 Hash：KEYS[1] = seats:session:{sid}
+--   field = seatNo（"行-列"），value = "0"(可售) 或 锁座 userId(占用)
 --
 -- KEYS[1] = seats:session:{sessionId}   座位状态 Hash
 -- KEYS[2] = userOrder:{sessionId}:{userId}   一人一单标记
--- KEYS[3..] = lock:seat:{sessionId}:{seatNo}   每座的归属锁（带 TTL 兜底幽灵锁）
--- ARGV[1..n] = seatNo（与 KEYS[3..] 一一对应）
+-- ARGV[1..n] = seatNo
 -- ARGV[n+1] = userId
--- ARGV[n+2] = 座位锁 TTL(秒)
--- ARGV[n+3] = 一人一单标记 TTL(秒)
--- return 0 成功 / 1 座位被占 / 3 该用户已有进行中的订单
+-- ARGV[n+2] = 一人一单标记 TTL(秒)
+-- return 0 成功 / 1 座位被占 / 3 该用户已有进行中的订单 / 4 座位图未初始化（需重建）
 
-local n = #ARGV - 3
-local userId = ARGV[n + 1]
-local lockTtl = tonumber(ARGV[n + 2])
-local uoTtl = tonumber(ARGV[n + 3])
+-- 0. 座位图整体缺失（未初始化 / TTL 过期 / Redis 丢失）→ 由 Java 重建后重试
+if redis.call('EXISTS', KEYS[1]) == 0 then
+    return 4
+end
 
--- 一人一单：有进行中的订单则拒绝
+-- 1. 一人一单：有进行中的订单则拒绝
 if redis.call('EXISTS', KEYS[2]) == 1 then
     return 3
 end
 
--- 1. 校验所有座位可售（v 为 nil 视为从未标记 = 可售）
+local n = #ARGV - 2
+local userId = ARGV[n + 1]
+local uoTtl = tonumber(ARGV[n + 2])
+
+-- 2. 校验所有座位可售（value 为 "0" 或 nil 均可售；非 "0" 即被占）
 for i = 1, n do
     local v = redis.call('HGET', KEYS[1], ARGV[i])
-    if v and v ~= '0' then
+    if v ~= nil and v ~= '0' then
         return 1
     end
 end
 
--- 2. 全部置位(占用) + 写归属锁(EX TTL，幽灵锁自动过期兜底)
+-- 3. 全部置占用（value = 锁座用户，供释放时归属校验）
 for i = 1, n do
-    redis.call('HSET', KEYS[1], ARGV[i], '1')
-    redis.call('SET', KEYS[2 + i], userId, 'EX', lockTtl)
+    redis.call('HSET', KEYS[1], ARGV[i], userId)
 end
 
--- 3. 一人一单标记
+-- 4. 一人一单标记
 redis.call('SET', KEYS[2], userId, 'EX', uoTtl)
 return 0
