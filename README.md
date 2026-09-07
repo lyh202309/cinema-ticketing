@@ -1,5 +1,3 @@
-# README\.md
-
 # Cinema Ticketing · 影院在线订票系统
 
 \<div align="center"\> \<p\> \<img src="[https://img\.shields\.io/badge/Spring%20Boot%203\.3\.5\-6DB33F](https://img.shields.io/badge/Spring%20Boot%203.3.5-6DB33F)" alt="Spring Boot"\> \<img src="[https://img\.shields\.io/badge/Java%2017\-007396](https://img.shields.io/badge/Java%2017-007396)" alt="Java"\> \<img src="[https://img\.shields\.io/badge/MyBatis\-Plus%203\.5\.7\-1F88E5](https://img.shields.io/badge/MyBatis-Plus%203.5.7-1F88E5)" alt="MyBatis\-Plus"\> \<img src="[https://img\.shields\.io/badge/Redis%20Lua\-DC382D](https://img.shields.io/badge/Redis%20Lua-DC382D)" alt="Redis Lua"\> \<img src="[https://img\.shields\.io/badge/RabbitMQ%20DLX\-FF6600](https://img.shields.io/badge/RabbitMQ%20DLX-FF6600)" alt="RabbitMQ DLX"\> \<img src="[https://img\.shields\.io/badge/Vue%203\-42B883](https://img.shields.io/badge/Vue%203-42B883)" alt="Vue 3"\> \<img src="[https://img\.shields\.io/badge/LangChain4j%20DeepSeek\-4D6BFE](https://img.shields.io/badge/LangChain4j%20DeepSeek-4D6BFE)" alt="LangChain4j \+ DeepSeek"\> \</p\> \</div\>
@@ -7,7 +5,7 @@
 
 
 ![image\.png](imgs/image.png)
-
+![img\.png](imgs/img.png)
 
 
 这是我学习了黑马点评之后，根据自己对并发和架构设计的理解而在新的业务场景下的知识应用

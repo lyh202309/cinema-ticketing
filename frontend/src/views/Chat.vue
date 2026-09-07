@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   listConversations, createConversation, getMessages, deleteConversation, streamChat,
 } from '../api/chat'
+import { mdToHtml } from '../utils/md'
 
 const route = useRoute()
 
@@ -54,23 +55,6 @@ async function removeConversation(conv, e) {
       if (conversations.value.length) selectConv(conversations.value[0].id)
     }
   } catch { /* 拦截器提示 */ }
-}
-
-// 把内容按 ``` 代码块切开（AI 会用代码块画 ASCII 座位图）
-function blocksOf(text) {
-  if (!text) return []
-  const parts = []
-  const re = /```([\s\S]*?)```/g
-  let idx = 0
-  let m
-  while ((m = re.exec(text))) {
-    if (m.index > idx) parts.push({ t: 'text', x: text.slice(idx, m.index) })
-    parts.push({ t: 'code', x: m[1] })
-    idx = m.index + m[0].length
-  }
-  if (idx < text.length) parts.push({ t: 'text', x: text.slice(idx) })
-  if (!parts.length) parts.push({ t: 'text', x: text })
-  return parts
 }
 
 async function send() {
@@ -133,9 +117,12 @@ onMounted(async () => {
       <div ref="listRef" class="msgs">
         <div v-for="(m, i) in messages" :key="i" class="bubble-wrap" :class="m.role === 0 ? 'right' : 'left'">
           <div class="bubble" :class="m.role === 0 ? 'user' : 'ai'">
-            <template v-for="(b, bi) in blocksOf(m.content)" :key="bi">
-              <pre v-if="b.t === 'code'" class="code-block">{{ b.x }}</pre>
-              <span v-else class="text" :class="{ caret: m.role === 1 && i === messages.length - 1 && sending }">{{ b.x }}</span>
+            <!-- 用户消息：纯文本，不解析 markdown -->
+            <span v-if="m.role === 0" class="text">{{ m.content }}</span>
+            <!-- AI 消息：解析 markdown -->
+            <template v-else>
+              <div class="md" v-html="mdToHtml(m.content)"></div>
+              <span v-if="i === messages.length - 1 && sending" class="caret"></span>
             </template>
           </div>
         </div>
@@ -173,10 +160,31 @@ onMounted(async () => {
 .bubble.user { background: var(--el-color-primary); color: #fff; }
 .bubble.ai { background: var(--el-fill-color-light); }
 .text { white-space: pre-wrap; word-break: break-word; }
-.text.caret::after { content: '▍'; animation: blink 1s infinite; }
+.caret { display: inline-block; }
+.caret::after { content: '▍'; animation: blink 1s infinite; }
 @keyframes blink { 50% { opacity: 0; } }
-.code-block { background: #0f1115; color: #d5ff80; padding: 10px 12px; border-radius: 8px;
+
+/* ===== AI 消息的 Markdown 渲染样式（v-html 内容用 :deep 命中） ===== */
+.md { word-break: break-word; }
+.md :deep(p) { margin: 4px 0; }
+.md :deep(h1), .md :deep(h2), .md :deep(h3), .md :deep(h4) { margin: 10px 0 4px; font-weight: 600; line-height: 1.4; }
+.md :deep(h1) { font-size: 18px; }
+.md :deep(h2) { font-size: 16px; }
+.md :deep(h3) { font-size: 15px; }
+.md :deep(h4) { font-size: 14px; }
+.md :deep(ul), .md :deep(ol) { margin: 4px 0; padding-left: 22px; }
+.md :deep(li) { margin: 2px 0; }
+.md :deep(code) { background: rgba(127, 127, 127, .18); padding: 1px 5px; border-radius: 4px;
+  font-family: Consolas, monospace; font-size: 13px; }
+.md :deep(pre) { background: #0f1115; color: #d5ff80; padding: 10px 12px; border-radius: 8px;
   font-family: Consolas, monospace; font-size: 13px; line-height: 1.5; overflow-x: auto;
   margin: 6px 0; white-space: pre; }
+.md :deep(pre code) { background: transparent; padding: 0; color: inherit; }
+.md :deep(blockquote) { border-left: 3px solid var(--el-border-color); margin: 6px 0;
+  padding: 2px 10px; color: var(--app-muted); }
+.md :deep(a) { color: var(--el-color-primary); text-decoration: underline; }
+.md :deep(table) { border-collapse: collapse; margin: 6px 0; font-size: 13px; }
+.md :deep(th), .md :deep(td) { border: 1px solid var(--el-border-color-lighter); padding: 4px 8px; text-align: left; }
+.md :deep(th) { background: var(--el-fill-color-light); font-weight: 600; }
 .input-bar { display: flex; gap: 10px; padding: 12px 14px; border-top: 1px solid var(--el-border-color-lighter); }
 </style>
