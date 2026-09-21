@@ -45,11 +45,12 @@
 
 * **实现AI的会话上下文 Redis\(30min 活跃\) \+ DB\(永久存档\) 双存储。**
 
-* **内置 RAG 知识库：购票/退改/抢票/支付/选座规则写成 FAQ 文档，AI 回答规则类问题前先检索，答案有据可查（气泡下方展示「依据」）。向量化在本地用纯 Java 完成，不需要任何 API Key、不依赖网络。**
+* **使用RAG 向量检索购票/退改规则等常见问题 FAQ，增强AI的回答。**
 
 ![img\.png](imgs/img.png)
 
-## 原始讨论记录：[方案讨论文档](方案讨论文档.md)
+
+
 ## 购票业务流程介绍:
 
 用户一次下单的完整流程：
@@ -366,102 +367,6 @@ lua脚本执行到一半崩了（修改已经生效），或者lua执行完成�
 
 
 
-## 肆\-\-AI 助手的 RAG 检索：规则类问题不再靠模型自由发挥
-
-### 背景：为什么要把规则从提示词里搬出去
-
-AI 助手原本把购票规则（5 分钟超时、每单最多 5 张、抢票资格是座位数的 3 倍……）**硬编码在系统提示词里**。这样做有三个问题：规则一改就要改代码重新部署；规则越加越多，提示词越来越长；而模型面对一长串规则仍然会记错、串味，甚至拿常识去补。
-
-改成 RAG 之后：规则以 Markdown FAQ 的形式放在 `server/src/main/resources/rag/`，启动时切分成片段、向量化后放进内存向量库；用户问规则类问题时，AI **必须先调工具检索**，再严格依据检索到的片段回答，检索不到就如实说不确定。
-
-### 检索链路
-
-```
-用户提问
-   │
-   ▼
-① Query Rewriting（可选，用 DeepSeek，temperature=0）
-   把口语化问法改写成若干检索词，如「我不想看了能退钱吗」
-     → ["退票", "退款 退钱", "取消订单 已支付"]
-   超时/报错/解析不出 → 静默降级为单路，绝不因为改写失败就不检索
-   │
-   ▼
-② 多路检索（本地，毫秒级）
-   第 0 路永远是用户原话（保底——改写可能跑偏，不能被变体取代）
-   每路各自：余弦相似度粗筛候选 → 算【查询词覆盖率】→ 低于门槛的丢弃
-   │
-   ▼
-③ 两梯队排序取 top-k
-   第一梯队 = 原话自己命中的片段，排序完全由原话决定，变体不参与
-   原话没填满 top-k 时，才用变体补召回（补进来的仍按【原话的覆盖率】排序）
-   │
-   ▼
-④ 拼成上下文喂给模型；这 k 条的标题落库到 tb_chat_message.sources
-   前端气泡下方展示「依据：xxx、yyy」
-```
-
-### 关键设计一：为什么用「覆盖率」而不是余弦相似度当门槛
-
-原计划沿用常规做法，给余弦相似度设阈值（`min-score`）。**实测把这个方案否掉了。** 下面是同一批问句上两个指标的对照（摘录；余弦分数是 LangChain4j 用 `(cos+1)/2` 映射到 0~1 后的值，也就是 `minScore` 实际比较的那个数）：
-
-| 问句 | 知识库有没有 | 余弦分数 | 覆盖率 |
-|---|---|---|---|
-| 支付方式有哪些 | 有 | 0.5990 | **0.7085** |
-| 退票怎么弄 | 有 | 0.6111 | **0.3007** |
-| 选座有什么限制 | 有 | 0.5590 | **0.3745** |
-| 怎么开发票 | **没有** | 0.5898 | 0.2466 |
-| 今天天气怎么样 | **没有** | 0.5685 | 0.1305 |
-
-「知识库有」这一组的余弦**最小值 0.5590**，居然**低于**「知识库没有」那一组的**最大值 0.5898**——余量是**负的（-0.0309）**，也就是说任何余弦阈值都必然误判，不存在可用的分界线。
-
-根因是量纲：一个十几个字的问句和一个两三百字的片段做余弦，片段的向量范数把分数稀释了，所有分数被压进 0.55~0.63 这条很窄的带子里，相关性信息几乎被淹没。顺带一个后果——原方案配的 `min-score: 0.70`（⇔ 原始余弦 0.40）在这个量纲下**永远不可能达到**，等于整个 RAG 静默失效：问什么都是「知识库未收录」，表面上看功能都在，实际一个问题也答不上来。
-
-而覆盖率（查询词里 IDF 加权后的特征，有多大比例在片段中出现过）在同一批数据上余量是 **+0.0542**（有：最小 0.3007 / 没有：最大 0.2466），可以干净地分开，门槛取 **0.27**。
-
-**最终分工：余弦降级为「粗筛候选」，覆盖率负责「打分 + 守门」。** 余弦的绝对值不可用，但它的排序大体还是准的——本次验证的 7 个命中问句里，有 5 个余弦与覆盖率给出的 top-1 是同一个片段；所以留着它做粗筛、以及给覆盖率并列时打破平局正合适。
-
-### 关键设计二：为什么没用 RRF 融合
-
-原计划用 RRF（Reciprocal Rank Fusion）融合多路结果，**实测同样否掉了**。改写出来的变体是「退票」「退款 退钱」这类关键词式短查询，彼此**高度相关**（共享同一套字面特征），而 RRF 的增益只在多路**互不相关**时才成立；高度相关时它会把变体那一路的噪声也累加起来，反而把原话命中的正确片段挤下去——实测「我不想看了能退钱吗」单路命中「已支付的订单怎么退票？能退钱吗？」，加了 RRF 之后 top-1 变成了不相关的「订单有哪些状态？」。
-
-多路召回的价值本来就在于**补召回**，而不是重排，所以改成两梯队：原话的结果占第一梯队且排序只由它自己决定，变体只在原话没填满 top-k 时才补位，且补位候选仍按**原话**的覆盖率排序（变体多是单个关键词，片段只要含这两个字覆盖率就是 1.0，毫无分辨力，拿它排序会把不相关片段排到前面）。
-
-### 如实说明技术选型与取舍
-
-- **本地哈希向量是「字面匹配」，不是「语义匹配」。** 实现是对中文 bigram / unigram + 连续字母数字串做 BM25 式 TF-IDF 加权，再用带符号的 FNV-1a 哈希投到 512 维。好处是零 API Key、零新增依赖、不下载模型、启动毫秒级（25 个片段 21ms）；代价是它只认字面重合，**同义改写的问法可能召回不到**（问「能退钱吗」而知识库只写「退款」）。缓解手段有两个，都在用：写知识库时把同义说法写进标题和正文（`## 已支付的订单怎么退票？能退钱吗？` 就是这么写的）；以及用 Query Rewriting 让大模型把口语翻译成知识库的措辞。
-- **规则已经不在提示词里了，全部依赖检索。** 所以 `cinema.rag.enabled=false` 时，AI 助手**无法回答规则类问题**，只会如实说不确定——这是本次改造的已知代价，换来的是规则可以独立于代码维护。
-- **检索不到时宁可说不确定，也不编造。** 提示词明确要求：拿到「知识库未收录」就如实告知用户，不要用常识补充。
-
-### RAG 配置项
-
-|配置项|默认值|说明|
-|---|---|---|
-|`cinema.rag.enabled`|`true`|`false` 则跳过知识库加载（AI 将无法回答规则类问题）|
-|`cinema.rag.top-k`|`4`|每次检索召回的知识片段数|
-|`cinema.rag.min-coverage`|`0.27`|**查询词覆盖率**门槛（0~1），**不是余弦相似度**。标定方法：用调试端点打一批真实问句，取「知识库有的问句的最小覆盖率」和「知识库没有的问句的最大覆盖率」之间；当前实测可用区间是 0.25 ~ 0.30|
-|`cinema.rag.dimension`|`512`|哈希向量维度|
-|`cinema.rag.rewrite-enabled`|`true`|是否用 DeepSeek 做查询改写（关闭则单路检索，少一次模型往返约 300~800ms）|
-|`cinema.rag.rewrite-count`|`3`|生成几个检索变体|
-
-**标定门槛的两种方式**：
-
-- **调试端点**：`GET /chat/faq/search?q=锁座多久失效` —— 看命中了哪些片段、覆盖率各是多少（需要应用已经跑起来）
-- **离线工装**：`server/tools/ragcheck/FaqCheck.java` —— 不用起 MySQL/Redis/DeepSeek，直接驱动生产代码跑 7 个必中问句 + 3 个必不中问句 + 3 个口语化问句，输出余弦/覆盖率对照表和「HIT 最小值 vs MISS 最大值」的分离度，最后给出可用门槛区间。当前那个 0.27 就是它跑出来的（余量 +0.0542）。改完知识库建议重跑一次。用法见文件头注释
-
-### 知识库维护
-
-`server/src/main/resources/rag/` 下 6 个 Markdown，按分类拆：`faq-buy` / `faq-refund` / `faq-seckill` / `faq-pay` / `faq-seat` / `faq-misc`。格式约定：`#` 一级标题 = 分类名，`##` 二级标题 = 一个知识片段（首个 `##` 之前的引言不当片段）。
-
-写知识库的三条纪律：
-
-1. **正文必须与代码事实一致**，数字处标注常量来源，如 `<!-- 同步自 config/RabbitMQConfig.java 的 ORDER_TIMEOUT_MS -->`
-2. **同义说法要写全**：用户会说「退钱」「不想看了」「没付款」，标题与正文里就该出现这些词，否则字面向量对不上
-3. **不要出现「资格」「名额」这类内部术语**，它们是实现细节，不该出现在给用户看的回答里
-
-> 知识库不做向量持久化缓存：25 个片段一次算完只要 21ms，持久化反而会引入「知识库改了、缓存没失效」这个对演示最致命的失败模式。改完 md 重启即可生效。
-
-
-
 ## 项目更多详细信息介绍
 
 ### 技术栈
@@ -472,7 +377,6 @@ AI 助手原本把购票规则（5 分钟超时、每单最多 5 张、抢票资
 |后端|Java 17 · Spring Boot 3\.3\.5|MyBatis\-Plus 3\.5\.7、Spring Data Redis、Spring AMQP、AOP、Validation|
 |中间件|MySQL · Redis · RabbitMQ|MySQL 存权威业务；Redis 存会话/资格/座位/限流；RabbitMQ 做延迟关单|
 |大模型|LangChain4j 1\.16\.2 · DeepSeek\(deepseek\-chat\)|OpenAI 兼容协议 \+ 工具调用 \+ SSE 流式|
-|RAG|InMemoryEmbeddingStore · 自实现的本地哈希向量`EmbeddingModel`|FAQ 知识库 6 篇 25 片段；**零 API Key · 零新增依赖 · 零网络**；@Tool 按需检索 \+ 查询改写多路补召回（详见「肆」）|
 |工具库|Hutool · Guava\(令牌桶\) · Lombok||
 
 ### 目录结构
@@ -480,24 +384,20 @@ AI 助手原本把购票规则（5 分钟超时、每单最多 5 张、抢票资
 ```Plain Text
 cinema-ticketing/
 ├── server/                        # Spring Boot 后端 :8081
-│   ├── src/main/
-│   │   ├── java/com/cinema/
-│   │   │   ├── controller/        # REST / SSE(movie·cinema·session·seckill·order·chat)
-│   │   │   ├── service/           # 业务:订单状态机 / 抢资格 / 锁座
-│   │   │   ├── chat/              # AI: CinemaAssistant + @Tool(场次/座位/订单/FAQ 检索)
-│   │   │   │   ├── embedding/     # LocalHashEmbeddingModel(本地哈希向量,零Key) / FaqMarkdownSplitter
-│   │   │   │   └── tool/          # OrderQueryTool / SeatQueryTool / FaqSearchTool(+FaqSource)
-│   │   │   ├── config/            # MyBatis-Plus / RabbitMQ(DLX) / Bloom 预热 / LangChain4j / FAQ 向量初始化
-│   │   │   ├── aspect/            # @RateLimit 二级限流切面
-│   │   │   ├── mq/                # MqDelaySender
-│   │   │   ├── consumer/          # OrderTimeoutConsumer(超时关单)
-│   │   │   └── utils/             # RedisConstants / CacheClient / BloomFilter / UserHolder
-│   │   └── resources/
-│   │       ├── db/                # schema.sql + seed.sql
-│   │       ├── lua/               # lockseat / releaseSeats / qualify / slidingwindow
-│   │       ├── rag/               # FAQ 知识库 faq-buy / refund / seckill / pay / seat / misc
-│   │       └── prompts/           # assistant-system.txt
-│   └── tools/ragcheck/            # 离线验证与门槛标定工装（Maven 构建之外，手动 javac 跑）
+│   └── src/main/
+│       ├── java/com/cinema/
+│       │   ├── controller/        # REST / SSE(movie·cinema·session·seckill·order·chat)
+│       │   ├── service/           # 业务:订单状态机 / 抢资格 / 锁座
+│       │   ├── chat/              # AI: CinemaAssistant + @Tool(场次/座位/订单)
+│       │   ├── config/            # MyBatis-Plus / RabbitMQ(DLX) / Bloom 预热 / LangChain4j
+│       │   ├── aspect/            # @RateLimit 二级限流切面
+│       │   ├── mq/                # MqDelaySender
+│       │   ├── consumer/          # OrderTimeoutConsumer(超时关单)
+│       │   └── utils/             # RedisConstants / CacheClient / BloomFilter / UserHolder
+│       └── resources/
+│           ├── db/                # schema.sql + seed.sql
+│           ├── lua/               # lockseat / releaseSeats / qualify / slidingwindow
+│           └── prompts/           # assistant-system.txt
 └── frontend/                      # Vue 3 + Vite :5173
     └── src/  views(Home/SeatSelect/Chat…) · components(SeatMap) · api · router · stores
 ```
@@ -522,11 +422,10 @@ mysql -uroot -p < server/src/main/resources/db/seed.sql
 5. 起前端 cd frontend \&\& npm install \&\& npm run dev，访问 [http://localhost:5173](http://localhost:5173)。
 
 6. 可选：填 cinema\.deepseek\.api\-key 后重启，启用 AI 助手。
-   RAG 知识库本身开箱即用，**检索链路的向量化不需要任何 API Key、不需要联网**（`cinema.rag.enabled` 默认 `true`，启动时自动加载）。对话本身仍走 DeepSeek，所以 AI 助手整体还是要那个 key；如果想连查询改写也一起离线，把 `cinema.rag.rewrite-enabled` 设为 `false` 即可，检索照常工作。
 
 > 登录验证码是**模拟发送**的——点发送后看后端控制台的 \[模拟短信\] 日志，复制 6 位验证码即可登录（任意未注册手机号自动注册）。
-> 
-> 
+>
+>
 
 ### 配置项（application\.yaml 需自行填写）
 
@@ -536,19 +435,122 @@ mysql -uroot -p < server/src/main/resources/db/seed.sql
 |spring\.data\.redis\.host / port / database|Redis 连接|
 |spring\.rabbitmq\.host / port / username / password|RabbitMQ 连接|
 |cinema\.deepseek\.api\-key|DeepSeek Key（不填不影响其它功能）|
-|cinema\.rag\.enabled|RAG 知识库总开关。`false` 时 AI **无法回答规则类问题**（规则已从提示词移除），只会如实说不确定|
-|cinema\.rag\.top\-k / dimension|每次召回片段数（默认 4）/ 哈希向量维度（默认 512）|
-|cinema\.rag\.min\-coverage|检索门槛，**查询词覆盖率**（默认 0.27），不是余弦相似度——原因见「肆」|
-|cinema\.rag\.rewrite\-enabled / rewrite\-count|是否用 DeepSeek 做查询改写（默认开）/ 生成几个检索变体（默认 3）|
 
 ### 数据库（9 张表，db/schema\.sql）
 
-tb\_user 用户 · tb\_cinema 影院 · tb\_hall 影厅\(行列布局\) · tb\_movie 电影 · tb\_session 场次\(票价/开售/热门标记\) · tb\_order 订单\(0待付/1已付/2取消/3退款\) · tb\_order\_seat 订单座位\(Redis 座位状态的对账依据\) · tb\_chat\_conversation AI 会话 · tb\_chat\_message AI 消息\(含 `sources` 引用来源\)
+tb\_user 用户 · tb\_cinema 影院 · tb\_hall 影厅\(行列布局\) · tb\_movie 电影 · tb\_session 场次\(票价/开售/热门标记\) · tb\_order 订单\(0待付/1已付/2取消/3退款\) · tb\_order\_seat 订单座位\(Redis 座位状态的对账依据\) · tb\_chat\_conversation AI 会话 · tb\_chat\_message AI 消息
 
-> ⚠️ **从「RAG 之前」的版本升级时，不要重导 `schema.sql`**——它第 6 行是 `DROP DATABASE IF EXISTS cinema_ticketing;`，会连用户和订单一起清掉。RAG 只新增了一列，手工补上即可：
->
-> ```sql
-> ALTER TABLE tb_chat_message
->   ADD COLUMN sources VARCHAR(500) DEFAULT NULL COMMENT '助手回复引用的FAQ标题,JSON数组';
-> ```
+# 电影院订票系统 · 方案讨论记录
 
+> 本文档记录本项目在动手实现前的架构探讨过程与个人思考，含技术决策、方案取舍与尚未定论的问题。
+
+## 一、技术栈
+
+| 项 | 选型 |
+|---|---|
+| 语言/框架 | **Java 17 + Spring Boot 3.x**（不用 Boot 2.3，新项目升级底座） |
+| 持久层 | MyBatis-Plus（boot3 starter） |
+| 缓存/并发 | Redis（座位图、抢座、缓存） |
+| 消息队列 | RabbitMQ（延迟队列、异步落库） |
+| AI | **LangChain4j** + **DeepSeek API**（用户已有 key，OpenAI 兼容 baseUrl 接入） |
+| 工具 | Hutool（HTTP、工具类） |
+
+## 二、已确认的业务决策
+
+| 项 | 决策 |
+|---|---|
+| 选座 | **完整选座**（座位图、锁座、超时释放、状态实时） |
+| 支付 | **模拟支付**：先创建待支付订单，**5 分钟生效期**，超时订单失效并释放座位 |
+| 订单粒度 | **一单可买多座**（一次选多个座位，一起锁定、一起支付） |
+| 退票 | 支持简单退票（已支付订单可退，座位释放回可售） |
+| 热门场次 | 要秒杀化 → **形态 B 双阶段**（先抢资格，再限时选座） |
+| 座位定价 | 统一票价（一个场次一个价） |
+| AI 助手 | **AI 对话助手**：方案 A（只读咨询），预留方案 B（操作类工具） |
+
+## 三、核心购票流程
+
+```
+热门场次（形态B·双阶段）：
+  浏览 → 选场次 → [1]点"抢票" → Lua 抢"资格名额"(计数器)
+  → 抢到资格(前N名) → [2]3分钟内选座 → 锁座 + 创建待支付订单(5分钟)
+  → 5分钟内支付 → 出票；超时 → 释放座位+取消订单；资格超时 → 名额回流
+
+普通场次：浏览 → 选场次 → 选座 → 锁座+下单 → 支付出票 / 超时释放 / 退票
+```
+
+## 四、关键技术难点与设计思考
+
+### 难点1：座位状态存储与并发抢座
+
+**个人思考的演进**：最初以为需要"三态"（0可售/1已锁/2已售）区分锁定与已售，但深入讨论后确认——**两态（0可售 / 1占用）就够**：
+
+- 座位图前端只看 `0/非0`
+- 抢座判定只看 `0/非0`
+- "已锁 vs 已售"的区别由**订单状态**承担（竞态判定方案见难点4），前端无需区分
+
+**存储结构**：bitmap 或 Hash 皆可（内存差距对一个场次几百座位可忽略，**Hash 更好调试**）。一个场次一个 key，field/bit=座位号。
+
+**并发抢座**：**Redis Lua 原子脚本**（校验==0 → 置1），Redis 单线程保证整个脚本原子执行，**并发下同一座位只有一个请求能成功**——这是"抢座"的并发核心。
+
+### 难点2：超时释放（5分钟未支付）
+
+倾向 **RabbitMQ 延迟队列（TTL 300s + 死信交换机 DLX）**：
+
+```
+下单 → 发延迟消息 → 队列躺5分钟 → 过期 → 死信队列 → 消费者查订单仍待支付 → 释放座位+取消
+```
+
+- 可靠（消息持久化）、时间精确、项目已用 RabbitMQ
+- 资格超时（3分钟）复用同一套延迟队列，不同 routing key
+- 排除：定时扫描（延迟大）、Redis 过期事件（不可靠、可能丢）、Redis ZSet（本质轮询）
+
+### 难点3：热门场次秒杀化 → 形态B 双阶段
+
+**关键洞察：为什么必须"先抢资格"？**
+
+- 不是"后端扛不住"——Redis Lua 已经把 DB 落库量过滤到"成功数"，DB 其实安全
+- 真实价值是**体验 + 资源 + 公平**：10 万人挤进选座页，99.8% 精心选座后被告知失败，体验崩盘且浪费资源；资格阶段是计数器抢购，抢不到的人**第一秒明确失败**，也避免"手速+网速"的选座不公平
+- 这是猫眼/淘票票做"先抢票资格"的真实原因
+
+### 难点4：竞态判定（支付/取消的原子互斥）——**尚未定论**
+
+这是整个方案最核心的分岔，**两个候选方案是自洽的两套组合，不可混搭**：
+
+**候选A：DB 乐观锁（我倾向推荐）**
+- 流程：抢座 Redis Lua 过滤 → **同步落库** → 支付/取消用 `UPDATE tb_order SET status=… WHERE status='待支付'` 判竞态
+- 订单状态**唯一真源在 DB**，Redis 只是可重建的两态缓存；**无双写、无最终一致**
+- 面试好讲："Redis 丢了 → 从 DB 重建座位状态"
+- **耦合要求**：必须同步落库（DB 里要有订单，乐观锁才成立）
+
+**候选B：Redis Lua（用户方案）**
+- 流程：抢座 Redis Lua → **MQ 异步落库**；支付/取消用 Redis 订单状态 Lua 原子转移（PENDING→PAID / CANCELLED 互斥）
+- 风格统一全 Redis、性能上限高、能展示 Lua 原子状态机
+- 代价：**Redis 订单状态 + DB 镜像两份状态**，需解释最终一致性与 Redis 故障恢复
+- **耦合要求**：必须异步落库（DB 里暂无订单，只能在 Redis 判）
+
+**关键认知**：
+1. 竞态的两个 UPDATE 都 `WHERE status='待支付'`，靠 InnoDB 行锁 + 当前读，**无论谁先谁后，只有一个成功**——"最后几秒支付"不会被误判释放
+2. **资格过滤后，两方案的性能差异可忽略** → 选择标准是"一致性模型哪个简单"
+3. 选候选A 的话，**MQ 异步削峰不浪费**——它应保留在真正 10 万并发的**抢资格阶段**
+
+### 额外思考：为什么订单状态必须持久化
+
+无论哪个方案，订单最终都要落 DB（业务资产、Redis 是内存可能丢）。差异只在"谁是真源"：DB 真源 → 恢复简单；Redis 真源 → 需要持久化配置（AOF/RDB）与恢复策略。
+
+## 五、AI 对话助手（LangChain4j）
+
+- **方案A（当前）**：只读咨询——查场次、查座位图、查我的订单（按 userId 隔离）、推荐与规则问答；不做锁座/下单/退票
+- **方案B（预留）**：加锁座/下单/退票工具
+- **只读边界的实现**：A 阶段只把只读 `@Tool` 类注册进 `AiServices.tools()`，操作类工具写好了但不注册——LLM 看不到清单里没有的工具，天然不可调用
+- **接入**：`OpenAiChatModel` 配 `baseUrl=https://api.deepseek.com` + apiKey
+- 会话管理：LangChain4j `MessageWindowChatMemory`（内存版先跑通，后续换 Redis 持久化）
+
+## 六、后续计划
+
+1. ~~难点1/2/3~~（已讨论清晰）
+2. [ ] **竞态判定选型**（候选A vs 候选B，未定，继续讨论）
+3. [ ] 领域模型与数据库表结构
+4. [ ] 高并发与缓存设计（Redis key 规范、缓存穿透/击穿）
+5. [ ] 包结构、接口清单与接口文档
+6. [ ] Agent 技术落地细节（会话管理 / 工具清单 / 流式输出）
+7. [ ] 前端规划
