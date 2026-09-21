@@ -545,12 +545,3 @@ tb\_user 用户 · tb\_cinema 影院 · tb\_hall 影厅\(行列布局\) · tb\_m
 - **接入**：`OpenAiChatModel` 配 `baseUrl=https://api.deepseek.com` + apiKey
 - 会话管理：LangChain4j `MessageWindowChatMemory`（内存版先跑通，后续换 Redis 持久化）
 
-## 六、后续计划
-
-1. ~~难点1/2/3~~（已讨论清晰）
-2. [ ] **竞态判定选型**（候选A vs 候选B，未定，继续讨论）
-3. [ ] 领域模型与数据库表结构
-4. [ ] 高并发与缓存设计（Redis key 规范、缓存穿透/击穿）
-5. [ ] 包结构、接口清单与接口文档
-6. [ ] Agent 技术落地细节（会话管理 / 工具清单 / 流式输出）
-7. [ ] 前端规划
