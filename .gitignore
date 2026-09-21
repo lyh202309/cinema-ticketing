@@ -34,3 +34,4 @@ Thumbs.db
 
 # ===== 本地敏感配置（如需保留本机真值，用这种文件且不要提交）=====
 # server/src/main/resources/application-local.yaml
+/RAG-交接文档.md

@@ -131,6 +131,7 @@ CREATE TABLE tb_chat_message (
     conversation_id BIGINT   NOT NULL COMMENT '所属会话',
     role            TINYINT  NOT NULL COMMENT '0用户/1助手',
     content         TEXT COMMENT '消息内容',
+    sources         VARCHAR(500) DEFAULT NULL COMMENT '助手回复引用的FAQ标题,JSON数组',
     create_time     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (id),
     KEY idx_conversation (conversation_id)

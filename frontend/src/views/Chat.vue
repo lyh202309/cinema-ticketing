@@ -11,7 +11,7 @@ const route = useRoute()
 
 const conversations = ref([])
 const currentId = ref(null)
-const messages = ref([]) // {role: 0用户/1助手, content}
+const messages = ref([]) // {role: 0用户/1助手, content, sources: 本轮引用的FAQ标题数组}
 const input = ref('')
 const sending = ref(false)
 const listRef = ref(null)
@@ -32,8 +32,18 @@ function selectConv(id) {
   loadMessages(id)
 }
 
+/** sources 后端存的是 JSON 数组字符串（无引用时为 null），解析失败一律当空处理 */
+function parseSources(s) {
+  try {
+    const arr = JSON.parse(s || '[]')
+    return Array.isArray(arr) ? arr : []
+  } catch { return [] }
+}
+
 async function loadMessages(id) {
-  messages.value = (await getMessages(id)).map((m) => ({ role: m.role, content: m.content }))
+  messages.value = (await getMessages(id)).map((m) => ({
+    role: m.role, content: m.content, sources: parseSources(m.sources),
+  }))
   scrollEnd()
 }
 
@@ -62,8 +72,8 @@ async function send() {
   if (!text || sending.value) return
   if (!currentId.value) return ElMessage.warning('请先新建会话')
   input.value = ''
-  messages.value.push({ role: 0, content: text })
-  messages.value.push({ role: 1, content: '' }) // AI 打字机占位
+  messages.value.push({ role: 0, content: text, sources: [] })
+  messages.value.push({ role: 1, content: '', sources: [] }) // AI 打字机占位
   const aiMsg = messages.value[messages.value.length - 1]
   sending.value = true
   scrollEnd()
@@ -123,6 +133,8 @@ onMounted(async () => {
             <template v-else>
               <div class="md" v-html="mdToHtml(m.content)"></div>
               <span v-if="i === messages.length - 1 && sending" class="caret"></span>
+              <!-- 必须用插值：md.js 的 XSS 免疫靠「先整体转义再解析」，这里绕开它用 v-html 等于开注入口子 -->
+              <div v-if="m.sources.length" class="src">依据：{{ m.sources.join('、') }}</div>
             </template>
           </div>
         </div>
@@ -163,6 +175,8 @@ onMounted(async () => {
 .caret { display: inline-block; }
 .caret::after { content: '▍'; animation: blink 1s infinite; }
 @keyframes blink { 50% { opacity: 0; } }
+/* RAG 引用来源：跟随全局「弱化色 + 小字号」约定 */
+.src { margin-top: 6px; font-size: 12px; color: var(--app-muted); }
 
 /* ===== AI 消息的 Markdown 渲染样式（v-html 内容用 :deep 命中） ===== */
 .md { word-break: break-word; }

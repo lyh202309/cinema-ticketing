@@ -24,5 +24,8 @@ public class ChatMessage {
 
     private String content;
 
+    /** 助手消息引用的 FAQ 标题（JSON 数组字符串），仅 role=1 可能有值 */
+    private String sources;
+
     private LocalDateTime createTime;
 }

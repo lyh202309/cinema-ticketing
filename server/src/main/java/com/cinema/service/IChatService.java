@@ -1,5 +1,6 @@
 package com.cinema.service;
 
+import com.cinema.chat.tool.FaqSource;
 import com.cinema.entity.ChatConversation;
 import com.cinema.entity.ChatMessage;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -25,4 +26,7 @@ public interface IChatService {
 
     /** 发送消息并 SSE 流式回答（校验归属；异步执行，消息落 DB 永久存档） */
     void ask(Long conversationId, Long userId, String message, SseEmitter emitter);
+
+    /** FAQ 检索调试：直接打知识库、不走对话链路，用于标定 min-score */
+    List<FaqSource> searchFaq(String query);
 }

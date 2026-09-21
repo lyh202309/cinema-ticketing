@@ -1,5 +1,6 @@
 package com.cinema.controller;
 
+import com.cinema.chat.tool.FaqSource;
 import com.cinema.common.Result;
 import com.cinema.dto.ChatRequest;
 import com.cinema.entity.ChatConversation;
@@ -50,5 +51,11 @@ public class ChatController {
         SseEmitter emitter = new SseEmitter(120_000L);
         chatService.ask(id, UserHolder.getUserId(), request.getMessage(), emitter);
         return emitter;
+    }
+
+    /** RAG 检索调试：标定 cinema.rag.min-coverage 用（比走完整聊天链路快得多） */
+    @GetMapping("/faq/search")
+    public Result<List<FaqSource>> faqSearch(@RequestParam("q") String q) {
+        return Result.ok(chatService.searchFaq(q));
     }
 }

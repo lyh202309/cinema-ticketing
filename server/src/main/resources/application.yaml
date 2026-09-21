@@ -43,3 +43,13 @@ cinema:
   deepseek:
     api-key: ""
     base-url: https://api.deepseek.com
+  # RAG 知识库（本地哈希向量，不需要任何 API key、不联网）
+  rag:
+    enabled: true          # false 则跳过知识库加载，AI 将无法回答规则类问题
+    top-k: 4               # 每次检索召回的知识片段数
+    min-coverage: 0.27     # 守门阈值：查询词覆盖率(0~1)，注意不是余弦相似度
+                           # 余弦在「短问句 vs 长片段」下只有 0.10~0.25，且与相关性区间重叠，
+                           # 标定不出可用阈值，故改用覆盖率。依据见 LocalHashEmbeddingModel#coverage
+    dimension: 512         # 哈希向量维度
+    rewrite-enabled: true  # 用 DeepSeek 做查询改写（多路召回），失败自动降级为单路
+    rewrite-count: 3       # 生成几个检索变体
